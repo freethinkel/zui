@@ -235,10 +235,11 @@ impl MetalRenderer {
         // Support direct-to-display rendering if the window is not transparent
         // https://developer.apple.com/documentation/metal/managing-your-game-window-for-metal-in-macos
         layer.set_opaque(!transparent);
-        // Keep one displayed drawable and one for the next frame. A third
-        // full-resolution surface adds graphics memory to every idle window;
-        // next_drawable provides backpressure when the GPU is still using one.
-        layer.set_maximum_drawable_count(2);
+        // Three, as Metal defaults to: during a live resize a frame is drawn
+        // inside the resize's CA transaction while the display link draws
+        // too, and with two drawables the main thread blocks in next_drawable
+        // and the window stutters as the resize starts.
+        layer.set_maximum_drawable_count(3);
         // Allow texture reading for visual tests (captures screenshots without ScreenCaptureKit)
         #[cfg(any(test, feature = "test-support"))]
         layer.set_framebuffer_only(false);
