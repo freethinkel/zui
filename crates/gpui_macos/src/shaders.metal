@@ -198,7 +198,7 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
   //
   // This is not always an accurate signed distance:
   // * The rounded portions with varying border width use an approximation of
-  //   nearest-point-on-ellipse.
+  //   nearest-point-on-superellipse.
   // * When it is quickly known to be outside the edge, -1.0 is used.
   float inner_sdf = 0.0;
   if (corner_center_to_point.x <= 0.0 || corner_center_to_point.y <= 0.0) {
@@ -209,7 +209,7 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
     // Fast path for points that must be outside the inner edge
     inner_sdf = -1.0;
   } else if (reduced_border.x == reduced_border.y) {
-    // Fast path for circular inner edge.
+    // Fast path for equal border widths: the inner edge is the corner curve's offset.
     inner_sdf = -(outer_sdf + reduced_border.x);
   } else {
     float2 inner_radii = max(float2(0.0), float2(corner_span) - reduced_border);
@@ -324,6 +324,7 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
 
         if (is_near_rounded_corner) {
           float radians = atan2(corner_center_to_point.y, corner_center_to_point.x);
+          // Arc length is taken proportional to the angle: exact for a circle, approximate for n = 2.7.
           float corner_t = radians / (M_PI_F / 2.0) * corner_arc_length(corner);
 
           if (center_to_point.x >= 0.0) {
@@ -453,7 +454,9 @@ float dash_alpha(
 float quarter_superellipse_sdf(float2 point, float2 radii, float n) {
   float2 q = max(float2(0.0), point) / max(radii, float2(1e-4));
   float norm = pow(pow(q.x, n) + pow(q.y, n), 1.0 / n);
-  // Approximate up-scaling of the length by using the average of the radii.
+  // Approximate up-scaling of the length by using the average of the radii. Unlike corner_curve_sdf this
+  // does not divide by the gradient, so the AA band is up to ~14 % narrower at 45° for n = 2.7 (the old
+  // ellipse approximated the same way).
   return (norm - 1.0) * (radii.x + radii.y) * -0.5;
 }
 
@@ -1113,6 +1116,7 @@ float2 corner_shape(float corner_radius, float2 half_size) {
 }
 
 // The length of a corner's curve for its (span, n): span · π/2 for a circle, span · 1.6582 for n = 2.7.
+// 1.6582 and 0.7 follow corner_shape's n range (2 -> 2.7); change them together.
 float corner_arc_length(float2 corner) {
   return corner.x * mix(M_PI_F / 2.0, 1.6582, (corner.y - 2.0) / 0.7);
 }
@@ -1123,6 +1127,10 @@ float corner_arc_length(float2 corner) {
 float corner_curve_sdf(float2 p, float span, float n) {
   if (n == 2.0) {
     return length(p) - span;
+  }
+  if (min(p.x, p.y) <= 0.0) {
+    // On an axis (or at the center): exactly p - span, no pow needed
+    return max(p.x, p.y) - span;
   }
   float2 q = p / span;
   float2 q_n1 = pow(q, float2(n - 1.0));
