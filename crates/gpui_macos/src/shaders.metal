@@ -28,6 +28,7 @@ float pick_corner_radius(float2 center_to_point, Corners_ScaledPixels corner_rad
 float quad_sdf(float2 point, Bounds_ScaledPixels bounds,
                Corners_ScaledPixels corner_radii);
 float2 corner_shape(float corner_radius, float2 half_size);
+float corner_arc_length(float2 corner);
 float corner_curve_sdf(float2 p, float span, float n);
 float quad_sdf_impl(float2 corner_center_to_point, float span, float n);
 float gaussian(float x, float sigma);
@@ -139,7 +140,6 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
   float2 corner = corner_shape(pick_corner_radius(center_to_point, quad.corner_radii), half_size);
   float corner_span = corner.x;
   float corner_n = corner.y;
-  float corner_radius = corner_span; // Tasks 3 and 4 replace its remaining uses
 
   // Width of the nearest borders
   float2 border = float2(
@@ -275,10 +275,14 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
         // When corners are rounded, the dashes are laid out clockwise
         // around the whole perimeter.
 
-        float r_tr = quad.corner_radii.top_right;
-        float r_br = quad.corner_radii.bottom_right;
-        float r_bl = quad.corner_radii.bottom_left;
-        float r_tl = quad.corner_radii.top_left;
+        float2 corner_tr = corner_shape(quad.corner_radii.top_right, half_size);
+        float2 corner_br = corner_shape(quad.corner_radii.bottom_right, half_size);
+        float2 corner_bl = corner_shape(quad.corner_radii.bottom_left, half_size);
+        float2 corner_tl = corner_shape(quad.corner_radii.top_left, half_size);
+        float r_tr = corner_tr.x;
+        float r_br = corner_br.x;
+        float r_bl = corner_bl.x;
+        float r_tl = corner_tl.x;
 
         float w_t = quad.border_widths.top;
         float w_r = quad.border_widths.right;
@@ -303,10 +307,10 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
         float corner_dash_velocity_tl = corner_dash_velocity(dv_t, dv_l);
 
         // Corner lengths in dash space
-        float c_tr = r_tr * (M_PI_F / 2.0) * corner_dash_velocity_tr;
-        float c_br = r_br * (M_PI_F / 2.0) * corner_dash_velocity_br;
-        float c_bl = r_bl * (M_PI_F / 2.0) * corner_dash_velocity_bl;
-        float c_tl = r_tl * (M_PI_F / 2.0) * corner_dash_velocity_tl;
+        float c_tr = corner_arc_length(corner_tr) * corner_dash_velocity_tr;
+        float c_br = corner_arc_length(corner_br) * corner_dash_velocity_br;
+        float c_bl = corner_arc_length(corner_bl) * corner_dash_velocity_bl;
+        float c_tl = corner_arc_length(corner_tl) * corner_dash_velocity_tl;
 
         // Cumulative dash space upto each segment
         float upto_tr = s_t;
@@ -320,7 +324,7 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
 
         if (is_near_rounded_corner) {
           float radians = atan2(corner_center_to_point.y, corner_center_to_point.x);
-          float corner_t = radians * corner_radius;
+          float corner_t = radians / (M_PI_F / 2.0) * corner_arc_length(corner);
 
           if (center_to_point.x >= 0.0) {
             if (center_to_point.y < 0.0) {
@@ -1165,6 +1169,11 @@ float2 corner_shape(float corner_radius, float2 half_size) {
   float span = min(corner_radius * 1.28, min(half_size.x, half_size.y));
   float n = mix(2.0, 2.7, saturate((span - corner_radius) / (corner_radius * 0.28)));
   return float2(span, n);
+}
+
+// The length of a corner's curve for its (span, n): span · π/2 for a circle, span · 1.6582 for n = 2.7.
+float corner_arc_length(float2 corner) {
+  return corner.x * mix(M_PI_F / 2.0, 1.6582, (corner.y - 2.0) / 0.7);
 }
 
 // Signed distance from the corner's curve, for p >= 0 measured from the corner's center. The
