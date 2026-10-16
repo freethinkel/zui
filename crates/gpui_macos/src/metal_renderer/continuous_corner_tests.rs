@@ -195,7 +195,6 @@ fn uniform_border_follows_the_curve() {
     let span = 1.28 * 20.;
     let expected = 1.6582 * span + 2. * (40. - span);
     let area: f32 = (0..40).flat_map(|y| ours[y * 200..y * 200 + 40].to_vec()).sum();
-    println!("uniform border area {area:.2}, expected {expected:.2}");
     assert!(
         (area - expected).abs() < 0.1 * expected,
         "corner border area {area:.1} px², expected {expected:.1}"
@@ -210,7 +209,6 @@ fn thick_border_leaves_no_holes() {
         s.insert_primitive(bordered_quad(b, 4., Edges::all(ScaledPixels(6.)), 1.))
     });
     let e = diff(&filled, &bordered);
-    println!("thick diff {e:.3}");
     assert!(e < 0.5, "a white border on a white fill differs from the fill by {e:.2} px²");
 }
 
@@ -226,6 +224,47 @@ fn uneven_border_leaves_no_holes() {
     let filled = gpui_mask(120, 120, |s| s.insert_primitive(white_quad(b, radii(20.))));
     let bordered = gpui_mask(120, 120, |s| s.insert_primitive(bordered_quad(b, 20., widths, 1.)));
     let e = diff(&filled, &bordered);
-    println!("uneven diff {e:.3}");
     assert!(e < 0.5, "a white uneven border on a white fill differs from the fill by {e:.2} px²");
+}
+
+/// Area of the border in the top-left 40 × 40 square, supersampled: inside the outer curve
+/// (radii `span`, exponent 2.7), outside the inner one (radii `span - width`, exponent `inner_n`).
+fn border_corner_area(span: f32, left: f32, top: f32, inner_n: f32) -> f32 {
+    let inside = |x: f32, y: f32, rx: f32, ry: f32, n: f32| {
+        let (qx, qy) = ((span - x).max(0.) / rx.max(1e-4), (span - y).max(0.) / ry.max(1e-4));
+        qx.powf(n) + qy.powf(n) <= 1.
+    };
+    const S: usize = 8;
+    let mut area = 0.;
+    for py in 0..40 * S {
+        for px in 0..40 * S {
+            let (x, y) = ((px as f32 + 0.5) / S as f32, (py as f32 + 0.5) / S as f32);
+            let in_outer = inside(x, y, span, span, 2.7);
+            let in_inner = x >= left && y >= top && inside(x, y, span - left, span - top, inner_n);
+            if in_outer && !in_inner {
+                area += 1. / (S * S) as f32;
+            }
+        }
+    }
+    area
+}
+
+#[test]
+fn uneven_border_inner_edge_follows_the_curve() {
+    let b = bounds(0., 0., 200., 200.);
+    let widths = Edges {
+        top: ScaledPixels(1.),
+        right: ScaledPixels(4.),
+        bottom: ScaledPixels(2.),
+        left: ScaledPixels(8.),
+    };
+    let ours = gpui_mask(200, 200, |s| s.insert_primitive(bordered_quad(b, 20., widths, 0.)));
+    let area: f32 = (0..40).flat_map(|y| ours[y * 200..y * 200 + 40].to_vec()).sum();
+    let superellipse = border_corner_area(25.6, 8., 1., 2.7);
+    let ellipse = border_corner_area(25.6, 8., 1., 2.0);
+    assert!(
+        (area - superellipse).abs() < 0.1 * superellipse
+            && (area - superellipse).abs() < (area - ellipse).abs(),
+        "corner border area {area:.1} px², expected {superellipse:.1} (n = 2.7), not {ellipse:.1} (n = 2)"
+    );
 }
