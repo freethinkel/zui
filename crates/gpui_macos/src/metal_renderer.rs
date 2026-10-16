@@ -2861,3 +2861,6 @@ mod backdrop_blur_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod continuous_corner_tests;
