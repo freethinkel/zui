@@ -107,3 +107,67 @@ fn pill_corner_is_a_circle() {
     let (e, base) = (diff(&ours, &circle), diff(&circle, &apple));
     assert!(e < 0.25 * base, "pill: {e:.2} px² off a circle, Apple's continuous pill is {base:.2} off");
 }
+
+#[test]
+fn each_corner_takes_its_own_radius() {
+    let mut top_left_only = Corners::default();
+    top_left_only.top_left = ScaledPixels(20.);
+    let ours = gpui_mask(200, 200, |s| {
+        s.insert_primitive(white_quad(bounds(0., 0., 200., 200.), top_left_only));
+    });
+    let apple = ca_mask(200, 200, 20., "continuous");
+    let circle = ca_mask(200, 200, 20., "circular");
+    // Only the top-left 50 × 50 is rounded; Apple's mask is symmetric, so its top-left is a reference.
+    let corner = |m: &[f32]| -> Vec<f32> { (0..50).flat_map(|y| m[y * 200..y * 200 + 50].to_vec()).collect() };
+    let (e, base) = (diff(&corner(&ours), &corner(&apple)), diff(&corner(&circle), &corner(&apple)));
+    assert!(e < 0.5 * base, "top-left: {e:.2} px² off Apple's curve, the circle is {base:.2}");
+    // The other corners are square: every pixel outside the top-left 50 × 50 is covered.
+    for y in 0..200 {
+        for x in 0..200 {
+            if x >= 50 || y >= 50 {
+                assert!(ours[y * 200 + x] > 0.99, "({x}, {y}) uncovered: {}", ours[y * 200 + x]);
+            }
+        }
+    }
+}
+
+#[test]
+fn small_quad_corner_stays_a_circle() {
+    let ours = gpui_mask(12, 12, |s| s.insert_primitive(white_quad(bounds(0., 0., 12., 12.), radii(6.))));
+    let circle = ca_mask(12, 12, 6., "circular");
+    let e = diff(&ours, &circle);
+    assert!(e < 1.5, "12 × 12 at r = 6: {e:.2} px² off a circle");
+}
+
+#[test]
+fn half_pixel_radius_stays_filled() {
+    let ours = gpui_mask(40, 40, |s| s.insert_primitive(white_quad(bounds(0., 0., 40., 40.), radii(0.5))));
+    assert!(ours.iter().all(|c| c.is_finite()));
+    for y in 1..39 {
+        for x in 1..39 {
+            assert!(ours[y * 40 + x] > 0.99, "({x}, {y}) uncovered: {}", ours[y * 40 + x]);
+        }
+    }
+}
+
+#[test]
+fn unblurred_shadow_takes_the_same_curve() {
+    let b = bounds(0., 0., 200., 200.);
+    let quad = gpui_mask(200, 200, |s| s.insert_primitive(white_quad(b, radii(20.))));
+    let shadow = gpui_mask(200, 200, |s| {
+        s.insert_primitive(Shadow {
+            order: 0,
+            blur_radius: ScaledPixels(0.),
+            bounds: b,
+            corner_radii: radii(20.),
+            content_mask: ContentMask { bounds: b },
+            color: gray(1.),
+            element_bounds: b,
+            element_corner_radii: radii(20.),
+            inset: 0,
+            pad: 0,
+        })
+    });
+    let e = diff(&quad, &shadow);
+    assert!(e < 2.0, "shadow and quad corners differ by {e:.2} px²");
+}
