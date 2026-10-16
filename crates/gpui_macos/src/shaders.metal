@@ -23,7 +23,7 @@ float4 distance_from_clip_rect_transformed(float2 unit_vertex, Bounds_ScaledPixe
 float corner_dash_velocity(float dv1, float dv2);
 float dash_alpha(float t, float period, float length, float dash_velocity,
                  float antialias_threshold);
-float quarter_ellipse_sdf(float2 point, float2 radii);
+float quarter_superellipse_sdf(float2 point, float2 radii, float n);
 float pick_corner_radius(float2 center_to_point, Corners_ScaledPixels corner_radii);
 float quad_sdf(float2 point, Bounds_ScaledPixels bounds,
                Corners_ScaledPixels corner_radii);
@@ -157,8 +157,8 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
   // the point into the bottom right quadrant. Both components are <= 0.
   float2 corner_to_point = fabs(center_to_point) - half_size;
 
-  // Vector from the point to the center of the rounded corner's circle, also
-  // mirrored into bottom right quadrant.
+  // Vector from the point to the center of the corner curve (the corner
+  // inset by corner_span), also mirrored into bottom right quadrant.
   float2 corner_center_to_point = corner_to_point + corner_span;
 
   // Whether the nearest point on the border is rounded
@@ -212,8 +212,8 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
     // Fast path for circular inner edge.
     inner_sdf = -(outer_sdf + reduced_border.x);
   } else {
-    float2 ellipse_radii = max(float2(0.0), float2(corner_radius) - reduced_border);
-    inner_sdf = quarter_ellipse_sdf(corner_center_to_point, ellipse_radii);
+    float2 inner_radii = max(float2(0.0), float2(corner_span) - reduced_border);
+    inner_sdf = quarter_superellipse_sdf(corner_center_to_point, inner_radii, corner_n);
   }
 
   // Negative when inside the border
@@ -442,20 +442,14 @@ float dash_alpha(
   return saturate(antialias_threshold - signed_distance / dash_velocity);
 }
 
-// This approximates distance to the nearest point to a quarter ellipse in a way
-// that is sufficient for anti-aliasing when the ellipse is not very eccentric.
-// The components of `point` are expected to be positive.
-//
-// Negative on the outside and positive on the inside.
-float quarter_ellipse_sdf(float2 point, float2 radii) {
-  // Scale the space to treat the ellipse like a unit circle
-  float2 circle_vec = point / radii;
-  float unit_circle_sdf = length(circle_vec) - 1.0;
+// The inner edge of a corner whose borders differ in width: the corner's superellipse (n = 2 is an
+// ellipse) with radii span - border. Positive inside. Radii reach 0 when a border is as wide as the
+// corner; they are kept above 0 so the division stays finite.
+float quarter_superellipse_sdf(float2 point, float2 radii, float n) {
+  float2 q = max(float2(0.0), point) / max(radii, float2(1e-4));
+  float norm = pow(pow(q.x, n) + pow(q.y, n), 1.0 / n);
   // Approximate up-scaling of the length by using the average of the radii.
-  //
-  // TODO: A better solution would be to use the gradient of the implicit
-  // function for an ellipse to approximate a scaling factor.
-  return unit_circle_sdf * (radii.x + radii.y) * -0.5;
+  return (norm - 1.0) * (radii.x + radii.y) * -0.5;
 }
 
 struct ShadowVertexOutput {

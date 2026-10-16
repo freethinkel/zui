@@ -171,3 +171,61 @@ fn unblurred_shadow_takes_the_same_curve() {
     let e = diff(&quad, &shadow);
     assert!(e < 2.0, "shadow and quad corners differ by {e:.2} px²");
 }
+
+pub(super) fn bordered_quad(
+    b: Bounds<ScaledPixels>,
+    r: f32,
+    widths: Edges<ScaledPixels>,
+    fill: f32,
+) -> Quad {
+    let mut quad = white_quad(b, radii(r));
+    quad.background = solid_background(gray(fill));
+    quad.border_color = gray(1.);
+    quad.border_widths = widths;
+    quad
+}
+
+#[test]
+fn uniform_border_follows_the_curve() {
+    let b = bounds(0., 0., 200., 200.);
+    let ours = gpui_mask(200, 200, |s| {
+        s.insert_primitive(bordered_quad(b, 20., Edges::all(ScaledPixels(1.)), 0.))
+    });
+    // The border's area in the 40 × 40 top-left square: the curve (L(2.7) · span) and the straight rest.
+    let span = 1.28 * 20.;
+    let expected = 1.6582 * span + 2. * (40. - span);
+    let area: f32 = (0..40).flat_map(|y| ours[y * 200..y * 200 + 40].to_vec()).sum();
+    println!("uniform border area {area:.2}, expected {expected:.2}");
+    assert!(
+        (area - expected).abs() < 0.1 * expected,
+        "corner border area {area:.1} px², expected {expected:.1}"
+    );
+}
+
+#[test]
+fn thick_border_leaves_no_holes() {
+    let b = bounds(0., 0., 60., 60.);
+    let filled = gpui_mask(60, 60, |s| s.insert_primitive(white_quad(b, radii(4.))));
+    let bordered = gpui_mask(60, 60, |s| {
+        s.insert_primitive(bordered_quad(b, 4., Edges::all(ScaledPixels(6.)), 1.))
+    });
+    let e = diff(&filled, &bordered);
+    println!("thick diff {e:.3}");
+    assert!(e < 0.5, "a white border on a white fill differs from the fill by {e:.2} px²");
+}
+
+#[test]
+fn uneven_border_leaves_no_holes() {
+    let b = bounds(0., 0., 120., 120.);
+    let widths = Edges {
+        top: ScaledPixels(1.),
+        right: ScaledPixels(4.),
+        bottom: ScaledPixels(2.),
+        left: ScaledPixels(8.),
+    };
+    let filled = gpui_mask(120, 120, |s| s.insert_primitive(white_quad(b, radii(20.))));
+    let bordered = gpui_mask(120, 120, |s| s.insert_primitive(bordered_quad(b, 20., widths, 1.)));
+    let e = diff(&filled, &bordered);
+    println!("uneven diff {e:.3}");
+    assert!(e < 0.5, "a white uneven border on a white fill differs from the fill by {e:.2} px²");
+}
