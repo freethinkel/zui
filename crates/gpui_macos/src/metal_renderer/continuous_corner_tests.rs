@@ -268,3 +268,22 @@ fn uneven_border_inner_edge_follows_the_curve() {
         "corner border area {area:.1} px², expected {superellipse:.1} (n = 2.7), not {ellipse:.1} (n = 2)"
     );
 }
+
+#[test]
+fn dashed_border_keeps_its_dashes_around_the_corner() {
+    let b = bounds(0., 0., 200., 200.);
+    let solid = gpui_mask(200, 200, |s| s.insert_primitive(bordered_quad(b, 20., Edges::all(ScaledPixels(2.)), 0.)));
+    let dashed = gpui_mask(200, 200, |s| {
+        let mut quad = bordered_quad(b, 20., Edges::all(ScaledPixels(2.)), 0.);
+        quad.border_style = BorderStyle::Dashed;
+        s.insert_primitive(quad)
+    });
+    // Dashes are 2 widths on, 1 off: about 2/3 of the solid border, around the corners too.
+    let (all_solid, all_dashed): (f32, f32) = (solid.iter().sum(), dashed.iter().sum());
+    let ratio = all_dashed / all_solid;
+    let corner = |m: &[f32]| -> f32 { (0..26).flat_map(|y| m[y * 200..y * 200 + 26].to_vec()).sum() };
+    let corner_ratio = corner(&dashed) / corner(&solid);
+    assert!((0.55..0.78).contains(&ratio), "dashed / solid = {ratio:.2}");
+    assert!((0.3..0.95).contains(&corner_ratio), "corner dashed / solid = {corner_ratio:.2}");
+    assert!(dashed.iter().all(|c| c.is_finite()));
+}
