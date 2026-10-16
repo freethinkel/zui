@@ -444,7 +444,8 @@ float dash_alpha(
 
 // The inner edge of a corner whose borders differ in width: the corner's superellipse (n = 2 is an
 // ellipse) with radii span - border. Positive inside. Radii reach 0 when a border is as wide as the
-// corner; they are kept above 0 so the division stays finite.
+// corner; they are kept above 0 so the division stays finite (at the floor on both axes inner_sdf is
+// 0 there, as the old ellipse did).
 float quarter_superellipse_sdf(float2 point, float2 radii, float n) {
   float2 q = max(float2(0.0), point) / max(radii, float2(1e-4));
   float norm = pow(pow(q.x, n) + pow(q.y, n), 1.0 / n);
