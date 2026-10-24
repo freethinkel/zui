@@ -1180,6 +1180,7 @@ mod tests {
                 actions: vec![SystemNotificationAction {
                     id: "open".into(),
                     label: "Open".into(),
+                    text_input: None,
                 }],
             });
         });
@@ -1198,6 +1199,7 @@ mod tests {
                 actions: vec![SystemNotificationAction {
                     id: "open".into(),
                     label: "Open".into(),
+                    text_input: None,
                 }],
             }]
         );
@@ -1220,10 +1222,12 @@ mod tests {
         cx.simulate_system_notification_response(SystemNotificationResponse {
             tag: "thread-1".into(),
             action_id: None,
+            text: None,
         });
         cx.simulate_system_notification_response(SystemNotificationResponse {
             tag: "thread-1".into(),
             action_id: Some("default".into()),
+            text: None,
         });
 
         assert_eq!(
@@ -1232,10 +1236,12 @@ mod tests {
                 SystemNotificationResponse {
                     tag: "thread-1".into(),
                     action_id: None,
+                    text: None,
                 },
                 SystemNotificationResponse {
                     tag: "thread-1".into(),
                     action_id: Some("default".into()),
+                    text: None,
                 },
             ]
         );
@@ -1259,6 +1265,7 @@ mod tests {
         let response = SystemNotificationResponse {
             tag: "thread-1".into(),
             action_id: None,
+            text: None,
         };
         cx.simulate_system_notification_response(response.clone());
 
@@ -1284,6 +1291,7 @@ mod tests {
         cx.simulate_system_notification_response(SystemNotificationResponse {
             tag: "thread-1".into(),
             action_id: None,
+            text: None,
         });
 
         assert!(cx.delivered_system_notifications().is_empty());

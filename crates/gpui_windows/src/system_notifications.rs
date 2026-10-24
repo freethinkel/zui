@@ -76,6 +76,7 @@ impl SystemNotificationState {
                     .unbounded_send(SystemNotificationResponse {
                         tag: response_tag.clone(),
                         action_id,
+                        text: None,
                     })
                     .ok();
                 Ok(())
