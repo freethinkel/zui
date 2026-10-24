@@ -106,16 +106,81 @@ fn continuous_corner_matches_core_animation() {
 }
 
 #[test]
-fn pill_corner_is_a_circle() {
-    let ours = gpui_mask(200, 40, |s| {
-        s.insert_primitive(white_quad(bounds(0., 0., 200., 40.), radii(20.)));
-    });
-    let circle = ca_mask(200, 40, 20., "circular");
-    let apple = ca_mask(200, 40, 20., "continuous");
-    let (e, base) = (diff(&ours, &circle), diff(&circle, &apple));
+fn pill_follows_apple_continuous_curve() {
+    // Where a side has no room for the full curve, Core Animation compresses the curve into that side
+    // and keeps easing into the other: a pill is not a circle.
+    for (w, h, r) in [(200, 40, 20.), (200, 40, 18.), (88, 64, 32.)] {
+        let ours = gpui_mask(w, h, |s| {
+            s.insert_primitive(white_quad(bounds(0., 0., w as f32, h as f32), radii(r)));
+        });
+        let apple = ca_mask(w as usize, h as usize, r as f64, "continuous");
+        let circle = ca_mask(w as usize, h as usize, r as f64, "circular");
+        let (e, base) = (diff(&ours, &apple), diff(&circle, &apple));
+        assert!(
+            e < 0.6 * base,
+            "{w} × {h} at r = {r}: {e:.2} px² off Apple's curve, the circle is {base:.2}"
+        );
+    }
+}
+
+#[test]
+fn rounded_clip_takes_the_same_curve() {
+    for (w, h, r) in [(100, 100, 20.), (200, 40, 20.)] {
+        let b = bounds(0., 0., w as f32, h as f32);
+        let quad = gpui_mask(w, h, |s| s.insert_primitive(white_quad(b, radii(r))));
+        let clipped = gpui_mask(w, h, |s| {
+            let mut quad = white_quad(b, Corners::default());
+            quad.fade = gpui::EdgeFadeParams {
+                clip_left: 0.,
+                clip_top: 0.,
+                clip_right: w as f32,
+                clip_bottom: h as f32,
+                clip_radius: r,
+                ..Default::default()
+            };
+            s.insert_primitive(quad)
+        });
+        let e = diff(&quad, &clipped);
+        assert!(
+            e < 2.0,
+            "{w} × {h} at r = {r}: clip and quad corners differ by {e:.2} px²"
+        );
+    }
+}
+
+#[test]
+fn blurred_shadow_takes_the_same_curve() {
+    // A blur of a pixel keeps the half-coverage contour on the shape's edge, so the thresholded shadow
+    // should match the thresholded quad, not a circular corner.
+    let b = bounds(0., 0., 200., 200.);
+    let r = 30.;
+    let threshold = |m: Vec<f32>| -> Vec<f32> {
+        m.into_iter()
+            .map(|v| if v >= 0.5 { 1. } else { 0. })
+            .collect()
+    };
+    let quad = threshold(gpui_mask(200, 200, |s| {
+        s.insert_primitive(white_quad(b, radii(r)))
+    }));
+    let shadow = threshold(gpui_mask(200, 200, |s| {
+        s.insert_primitive(Shadow {
+            order: 0,
+            blur_radius: ScaledPixels(1.),
+            bounds: b,
+            corner_radii: radii(r),
+            content_mask: ContentMask { bounds: b },
+            color: gray(1.),
+            element_bounds: b,
+            element_corner_radii: radii(r),
+            inset: 0,
+            pad: 0,
+        })
+    }));
+    let circle = threshold(ca_mask(200, 200, r as f64, "circular"));
+    let (e, base) = (diff(&shadow, &quad), diff(&circle, &quad));
     assert!(
-        e < 0.25 * base,
-        "pill: {e:.2} px² off a circle, Apple's continuous pill is {base:.2} off"
+        e < 0.3 * base,
+        "blurred shadow: {e:.0} px off the quad's curve, the circle is {base:.0}"
     );
 }
 
@@ -252,22 +317,25 @@ fn thick_border_leaves_no_holes() {
 
 #[test]
 fn uneven_border_leaves_no_holes() {
-    let b = bounds(0., 0., 120., 120.);
     let widths = Edges {
         top: ScaledPixels(1.),
         right: ScaledPixels(4.),
         bottom: ScaledPixels(2.),
         left: ScaledPixels(8.),
     };
-    let filled = gpui_mask(120, 120, |s| s.insert_primitive(white_quad(b, radii(20.))));
-    let bordered = gpui_mask(120, 120, |s| {
-        s.insert_primitive(bordered_quad(b, 20., widths, 1.))
-    });
-    let e = diff(&filled, &bordered);
-    assert!(
-        e < 0.5,
-        "a white uneven border on a white fill differs from the fill by {e:.2} px²"
-    );
+    // A square's corners, and a pill's, whose curve differs along each side
+    for (w, h, r) in [(120, 120, 20.), (200, 40, 20.)] {
+        let b = bounds(0., 0., w as f32, h as f32);
+        let filled = gpui_mask(w, h, |s| s.insert_primitive(white_quad(b, radii(r))));
+        let bordered = gpui_mask(w, h, |s| {
+            s.insert_primitive(bordered_quad(b, r, widths, 1.))
+        });
+        let e = diff(&filled, &bordered);
+        assert!(
+            e < 0.5,
+            "{w} × {h}: a white uneven border on a white fill differs from the fill by {e:.2} px²"
+        );
+    }
 }
 
 /// Area of the border in the top-left 40 × 40 square, supersampled: inside the outer curve
@@ -343,6 +411,23 @@ fn dashed_border_keeps_its_dashes_around_the_corner() {
     assert!(
         (0.3..0.95).contains(&corner_ratio),
         "corner dashed / solid = {corner_ratio:.2}"
+    );
+    assert!(dashed.iter().all(|c| c.is_finite()));
+
+    // A pill's dashes run around its uneven corners too
+    let b = bounds(0., 0., 200., 40.);
+    let solid = gpui_mask(200, 40, |s| {
+        s.insert_primitive(bordered_quad(b, 20., Edges::all(ScaledPixels(2.)), 0.))
+    });
+    let dashed = gpui_mask(200, 40, |s| {
+        let mut quad = bordered_quad(b, 20., Edges::all(ScaledPixels(2.)), 0.);
+        quad.border_style = BorderStyle::Dashed;
+        s.insert_primitive(quad)
+    });
+    let ratio = dashed.iter().sum::<f32>() / solid.iter().sum::<f32>();
+    assert!(
+        (0.55..0.78).contains(&ratio),
+        "pill dashed / solid = {ratio:.2}"
     );
     assert!(dashed.iter().all(|c| c.is_finite()));
 }
