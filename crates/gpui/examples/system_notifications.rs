@@ -47,10 +47,12 @@ impl Render for SystemNotificationExample {
                                     SystemNotificationAction {
                                         id: "open".into(),
                                         label: "Open".into(),
+                                        text_input: None,
                                     },
                                     SystemNotificationAction {
-                                        id: "snooze".into(),
-                                        label: "Snooze".into(),
+                                        id: "reply".into(),
+                                        label: "Reply".into(),
+                                        text_input: Some("Message".into()),
                                     },
                                 ],
                             });
@@ -106,12 +108,19 @@ fn run_example() {
         cx.on_system_notification_response({
             let view = view.clone();
             move |response, cx| {
-                let SystemNotificationResponse { tag, action_id } = response;
+                let SystemNotificationResponse {
+                    tag,
+                    action_id,
+                    text,
+                } = response;
                 view.update(cx, |this, cx| {
                     this.status = match action_id {
-                        Some(action_id) => {
-                            format!("Received action '{action_id}' for tag '{tag}'").into()
-                        }
+                        Some(action_id) => match text {
+                            Some(text) => {
+                                format!("Received '{action_id}' for tag '{tag}': {text}").into()
+                            }
+                            None => format!("Received action '{action_id}' for tag '{tag}'").into(),
+                        },
                         None => format!("Notification body clicked for tag '{tag}'").into(),
                     };
                     cx.notify();

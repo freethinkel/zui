@@ -76,7 +76,11 @@ impl SystemNotificationState {
                         }
                     };
                     sender
-                        .unbounded_send(SystemNotificationResponse { tag, action_id })
+                        .unbounded_send(SystemNotificationResponse {
+                            tag,
+                            action_id,
+                            text: None,
+                        })
                         .ok();
                 }),
                 Err(error) => log::warn!("failed to show system notification: {error}"),

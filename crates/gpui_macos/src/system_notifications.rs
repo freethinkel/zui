@@ -24,8 +24,8 @@ use objc2_user_notifications::{
     UNAuthorizationOptions, UNMutableNotificationContent, UNNotification, UNNotificationAction,
     UNNotificationActionOptions, UNNotificationCategory, UNNotificationCategoryOptions,
     UNNotificationDefaultActionIdentifier, UNNotificationPresentationOptions,
-    UNNotificationRequest, UNNotificationResponse, UNUserNotificationCenter,
-    UNUserNotificationCenterDelegate,
+    UNNotificationRequest, UNNotificationResponse, UNTextInputNotificationAction,
+    UNTextInputNotificationResponse, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
 };
 
 type ResponseCallback = Rc<RefCell<Option<Box<dyn FnMut(SystemNotificationResponse)>>>>;
@@ -205,11 +205,23 @@ impl NotificationCenter {
         let platform_actions: Vec<Retained<UNNotificationAction>> = actions
             .iter()
             .map(|action| {
-                UNNotificationAction::actionWithIdentifier_title_options(
-                    &NSString::from_str(&action.id),
-                    &NSString::from_str(&action.label),
-                    UNNotificationActionOptions::empty(),
-                )
+                let (id, label) = (NSString::from_str(&action.id), NSString::from_str(&action.label));
+                match &action.text_input {
+                    Some(placeholder) => Retained::into_super(
+                        UNTextInputNotificationAction::actionWithIdentifier_title_options_textInputButtonTitle_textInputPlaceholder(
+                            &id,
+                            &label,
+                            UNNotificationActionOptions::empty(),
+                            &label,
+                            &NSString::from_str(placeholder),
+                        ),
+                    ),
+                    None => UNNotificationAction::actionWithIdentifier_title_options(
+                        &id,
+                        &label,
+                        UNNotificationActionOptions::empty(),
+                    ),
+                }
             })
             .collect();
         let category =
@@ -273,11 +285,15 @@ define_class!(
             } else {
                 Some(SharedString::from(action.to_string()))
             };
+            let text = response
+                .downcast_ref::<UNTextInputNotificationResponse>()
+                .map(|response| SharedString::from(response.userText().to_string()));
             self.ivars()
                 .sender
                 .unbounded_send(SystemNotificationResponse {
                     tag: SharedString::from(tag),
                     action_id,
+                    text,
                 })
                 .ok();
             completion_handler.call(());

@@ -374,6 +374,10 @@ pub struct SystemNotificationAction {
     pub id: SharedString,
     /// The button's user-visible label.
     pub label: SharedString,
+    /// When set, the button opens a text field with this placeholder, and
+    /// the typed text comes back in [`SystemNotificationResponse::text`].
+    /// Platforms without text input on notifications show a plain button.
+    pub text_input: Option<SharedString>,
 }
 
 /// The user's activation of a [`SystemNotification`].
@@ -384,6 +388,8 @@ pub struct SystemNotificationResponse {
     /// The pressed action button's [`SystemNotificationAction::id`], or
     /// `None` when the user activated the notification body itself.
     pub action_id: Option<SharedString>,
+    /// What the user typed into a text input action's field.
+    pub text: Option<SharedString>,
 }
 
 /// Thermal state of the system
