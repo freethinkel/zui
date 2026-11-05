@@ -935,15 +935,24 @@ fragment float4 path_sprite_fragment(
 }
 
 struct SurfaceVertexOutput {
+  uint surface_id [[flat]];
   float4 position [[position]];
   float2 texture_position;
   float clip_distance [[clip_distance]][4];
 };
 
 struct SurfaceFragmentInput {
+  uint surface_id [[flat]];
   float4 position [[position]];
   float2 texture_position;
 };
+
+// 1 inside the surface's rounded bounds, 0 outside, antialiased over the pixel on the edge.
+float surface_coverage(SurfaceFragmentInput input, constant SurfaceBounds *surfaces) {
+  SurfaceBounds surface = surfaces[input.surface_id];
+  float distance = quad_sdf(input.position.xy, surface.bounds, surface.corner_radii);
+  return saturate(0.5 - distance);
+}
 
 vertex SurfaceVertexOutput surface_vertex(
     uint unit_vertex_id [[vertex_id]], uint surface_id [[instance_id]],
@@ -963,12 +972,15 @@ vertex SurfaceVertexOutput surface_vertex(
   // to the current vertex of the unit triangle.
   float2 texture_position = unit_vertex;
   return SurfaceVertexOutput{
+      surface_id,
       device_position,
       texture_position,
       {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
 }
 
 fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
+                                 constant SurfaceBounds *surfaces
+                                 [[buffer(SurfaceInputIndex_Surfaces)]],
                                  texture2d<float> y_texture
                                  [[texture(SurfaceInputIndex_YTexture)]],
                                  texture2d<float> cb_cr_texture
@@ -983,7 +995,18 @@ fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
       y_texture.sample(texture_sampler, input.texture_position).r,
       cb_cr_texture.sample(texture_sampler, input.texture_position).rg, 1.0);
 
-  return ycbcrToRGBTransform * ycbcr;
+  return (ycbcrToRGBTransform * ycbcr) * float4(1., 1., 1., surface_coverage(input, surfaces));
+}
+
+// A BGRA buffer, drawn as it is: the texture's own colors, the surface's rounded corners.
+fragment float4 surface_fragment_bgra(SurfaceFragmentInput input [[stage_in]],
+                                      constant SurfaceBounds *surfaces
+                                      [[buffer(SurfaceInputIndex_Surfaces)]],
+                                      texture2d<float> texture
+                                      [[texture(SurfaceInputIndex_YTexture)]]) {
+  constexpr sampler texture_sampler(mag_filter::linear, min_filter::linear);
+  float4 color = texture.sample(texture_sampler, input.texture_position);
+  return float4(color.rgb, 1.) * float4(1., 1., 1., surface_coverage(input, surfaces));
 }
 
 float4 hsla_to_rgba(Hsla hsla) {

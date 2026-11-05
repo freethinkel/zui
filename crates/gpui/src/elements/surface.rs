@@ -98,7 +98,7 @@ impl Element for Surface {
                 let size = crate::size(surface.get_width().into(), surface.get_height().into());
                 let new_bounds = self.object_fit.get_bounds(bounds, size);
                 // TODO: Add support for corner_radii
-                window.paint_surface(new_bounds, surface.clone());
+                window.paint_surface(new_bounds, crate::Corners::default(), surface.clone());
             }
             #[allow(unreachable_patterns)]
             _ => {}

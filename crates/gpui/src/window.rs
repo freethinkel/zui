@@ -4805,11 +4805,18 @@ impl Window {
         Ok(())
     }
 
-    /// Paint a surface into the scene for the next frame at the current z-index.
+    /// Paint a surface into the scene for the next frame at the current z-index, its corners rounded by
+    /// `corner_radii`. The buffer is NV12 (`kCVPixelFormatType_420YpCbCr8BiPlanarFullRange`, a screen share's) or
+    /// BGRA (`kCVPixelFormatType_32BGRA`); an IOSurface-backed one reaches the GPU without a copy.
     ///
     /// This method should only be called as part of the paint phase of element drawing.
     #[cfg(target_os = "macos")]
-    pub fn paint_surface(&mut self, bounds: Bounds<Pixels>, image_buffer: CVPixelBuffer) {
+    pub fn paint_surface(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        image_buffer: CVPixelBuffer,
+    ) {
         use crate::PaintSurface;
 
         self.invalidator.debug_assert_paint();
@@ -4820,6 +4827,7 @@ impl Window {
             order: 0,
             bounds,
             content_mask,
+            corner_radii: corner_radii.scale(self.scale_factor()),
             image_buffer,
         });
     }
