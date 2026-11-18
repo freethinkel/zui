@@ -364,6 +364,11 @@ pub struct SystemNotification {
     /// Buttons offered on the notification. Platforms that cannot display
     /// action buttons show the notification without them.
     pub actions: Vec<SystemNotificationAction>,
+    /// An image shown with the notification, as a browser shows a web
+    /// notification's icon: on macOS a thumbnail beside the text. The file is
+    /// copied, so it may be deleted or changed once the notification is
+    /// posted. Platforms that cannot show one ignore it.
+    pub image: Option<std::path::PathBuf>,
 }
 
 /// A button offered on a [`SystemNotification`].

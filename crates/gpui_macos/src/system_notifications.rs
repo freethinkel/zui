@@ -19,10 +19,12 @@ use gpui::{
 use objc2::rc::Retained;
 use objc2::runtime::{Bool, ProtocolObject};
 use objc2::{AnyThread, DefinedClass, define_class, msg_send};
-use objc2_foundation::{NSArray, NSBundle, NSError, NSObject, NSObjectProtocol, NSSet, NSString};
+use objc2_foundation::{
+    NSArray, NSBundle, NSError, NSObject, NSObjectProtocol, NSSet, NSString, NSURL,
+};
 use objc2_user_notifications::{
     UNAuthorizationOptions, UNMutableNotificationContent, UNNotification, UNNotificationAction,
-    UNNotificationActionOptions, UNNotificationCategory, UNNotificationCategoryOptions,
+    UNNotificationActionOptions, UNNotificationAttachment, UNNotificationCategory, UNNotificationCategoryOptions,
     UNNotificationDefaultActionIdentifier, UNNotificationPresentationOptions,
     UNNotificationRequest, UNNotificationResponse, UNTextInputNotificationAction,
     UNTextInputNotificationResponse, UNUserNotificationCenter, UNUserNotificationCenterDelegate,
@@ -167,6 +169,9 @@ impl NotificationCenter {
         let content = UNMutableNotificationContent::new();
         content.setTitle(&NSString::from_str(&notification.title));
         content.setBody(&NSString::from_str(&notification.body));
+        if let Some(attachment) = notification.image.as_deref().and_then(|image| attachment(&notification.tag, image)) {
+            content.setAttachments(&NSArray::from_retained_slice(&[attachment]));
+        }
         if !notification.actions.is_empty() {
             let category_identifier = self.register_category(&notification.actions);
             content.setCategoryIdentifier(&NSString::from_str(&category_identifier));
@@ -248,6 +253,39 @@ impl NotificationCenter {
             .removePendingNotificationRequestsWithIdentifiers(&identifiers);
         self.center
             .removeDeliveredNotificationsWithIdentifiers(&identifiers);
+    }
+}
+
+/// The notification's image as an attachment. The notification center moves
+/// an attachment's file into its own store, so it gets a copy, named for the
+/// tag (whose characters a file name can't take are replaced) and keeping the
+/// extension the center reads the image's type from.
+fn attachment(tag: &str, image: &std::path::Path) -> Option<Retained<UNNotificationAttachment>> {
+    let name: String = tag
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+        .collect();
+    let extension = image.extension().and_then(|e| e.to_str()).unwrap_or("png");
+    let copy = std::env::temp_dir().join(format!("gpui-notification-{name}.{extension}"));
+    if let Err(error) = std::fs::copy(image, &copy) {
+        log::warn!("notification image {}: {error}", image.display());
+        return None;
+    }
+    let url = NSURL::fileURLWithPath(&NSString::from_str(&copy.to_string_lossy()));
+    // SAFETY: no options dictionary is passed.
+    match unsafe {
+        UNNotificationAttachment::attachmentWithIdentifier_URL_options_error(
+            &NSString::from_str("image"),
+            &url,
+            None,
+        )
+    } {
+        Ok(attachment) => Some(attachment),
+        Err(error) => {
+            let _ = std::fs::remove_file(&copy);
+            log::warn!("notification image {}: {}", image.display(), error.localizedDescription());
+            None
+        }
     }
 }
 

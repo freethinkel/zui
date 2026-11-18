@@ -55,6 +55,7 @@ impl Render for SystemNotificationExample {
                                         text_input: Some("Message".into()),
                                     },
                                 ],
+                                image: None,
                             });
                             this.status = format!("Posted notification revision {revision}").into();
                             cx.notify();
