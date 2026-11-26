@@ -113,14 +113,14 @@ impl PlatformAtlas for DirectXAtlas {
             return;
         };
 
+        // Keep the texture in its slot even when it becomes unreferenced: the
+        // last-painted scene may still hold this texture's id until the next
+        // repaint, and the renderer must be able to resolve it. Its tile space
+        // is fully deallocated, so `allocate` reuses the texture in place.
         if let Some(mut texture) = texture_slot.take() {
             texture.allocator.deallocate(tile.tile_id.into());
             texture.decrement_ref_count();
-            if texture.is_unreferenced() {
-                textures.free_list.push(texture.id.index as usize);
-            } else {
-                *texture_slot = Some(texture);
-            }
+            *texture_slot = Some(texture);
         }
     }
 }
@@ -321,10 +321,6 @@ impl DirectXAtlasTexture {
 
     fn decrement_ref_count(&mut self) {
         self.live_atlas_keys -= 1;
-    }
-
-    fn is_unreferenced(&mut self) -> bool {
-        self.live_atlas_keys == 0
     }
 }
 

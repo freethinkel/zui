@@ -100,14 +100,14 @@ impl PlatformAtlas for MetalAtlas {
             return;
         };
 
+        // Keep the texture in its slot even when it becomes unreferenced: the
+        // last-painted scene may still hold this texture's id until the next
+        // repaint, and the renderer must be able to resolve it. Its tile space
+        // is fully deallocated, so `allocate` reuses the texture in place.
         if let Some(mut texture) = texture_slot.take() {
             texture.allocator.deallocate(tile.tile_id.into());
             texture.decrement_ref_count();
-            if texture.is_unreferenced() {
-                textures.free_list.push(id.index as usize);
-            } else {
-                *texture_slot = Some(texture);
-            }
+            *texture_slot = Some(texture);
         }
     }
 }
@@ -270,10 +270,6 @@ impl MetalAtlasTexture {
     fn decrement_ref_count(&mut self) {
         self.live_atlas_keys -= 1;
     }
-
-    fn is_unreferenced(&mut self) -> bool {
-        self.live_atlas_keys == 0
-    }
 }
 
 fn size_to_etagere(size: Size<DevicePixels>) -> etagere::Size {
@@ -349,11 +345,11 @@ mod tests {
         // Remove B: texture still has C.
         atlas.remove(&key_b);
 
-        // Remove C: texture becomes unreferenced and is deleted.
+        // Remove C: texture becomes unreferenced but stays in its slot, so
+        // ids already handed out to painted scenes keep resolving.
         atlas.remove(&key_c);
 
-        // Re-inserting A must allocate a fresh tile on a new texture,
-        // NOT return a stale tile referencing the deleted texture.
+        // Re-inserting A must return a tile whose texture resolves.
         let tile_a2 = insert_tile(&atlas, &key_a, small);
 
         // The texture must actually exist — this would panic before the fix.
@@ -395,5 +391,25 @@ mod tests {
         };
         let key = make_image_key(999, 0);
         atlas.remove(&key);
+    }
+
+    #[test]
+    fn test_remove_keeps_texture_resolvable_for_painted_scenes() {
+        let Some(atlas) = create_atlas() else {
+            return;
+        };
+
+        let small = Size {
+            width: DevicePixels(64),
+            height: DevicePixels(64),
+        };
+
+        let key = make_image_key(1, 0);
+        let tile = insert_tile(&atlas, &key, small);
+        atlas.remove(&key);
+
+        // A scene painted before the removal still holds this texture id at
+        // draw time; resolving it must not panic.
+        let _texture = atlas.metal_texture(tile.texture_id);
     }
 }
