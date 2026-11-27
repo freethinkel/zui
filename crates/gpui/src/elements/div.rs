@@ -51,6 +51,10 @@ use super::ImageCacheProvider;
 /// and Windows mouse jitter does the same. 4px everywhere, the size of
 /// Windows' system drag rectangle (`SM_CXDRAG`/`SM_CYDRAG`).
 const DRAG_THRESHOLD: f64 = 4.;
+/// A drag released over its source within this distance of where it was
+/// pressed is cancelled and delivered as the click it was meant to be:
+/// pressing a trackpad or mouse can jitter past the threshold mid-click.
+const CLICK_SLOP: f64 = 8.;
 const DEFAULT_TOOLTIP_SHOW_DELAY: Duration = Duration::from_millis(500);
 const HOVERABLE_TOOLTIP_HIDE_DELAY: Duration = Duration::from_millis(500);
 
@@ -2760,8 +2764,14 @@ impl Interactivity {
                     }
                 });
 
+                let drag_origin = element_state
+                    .drag_origin
+                    .get_or_insert_with(Default::default)
+                    .clone();
+
                 window.on_mouse_event({
                     let pending_mouse_down = pending_mouse_down.clone();
+                    let drag_origin = drag_origin.clone();
                     let hitbox = hitbox.clone();
                     move |event: &MouseMoveEvent, phase, window, cx| {
                         if phase == DispatchPhase::Capture {
@@ -2779,6 +2789,7 @@ impl Interactivity {
                             let cursor_offset = event.position - hitbox.origin;
                             let drag =
                                 (drag_listener)(drag_value.as_ref(), cursor_offset, window, cx);
+                            *drag_origin.borrow_mut() = Some((mouse_down.clone(), drag_value.clone()));
                             cx.active_drag = Some(AnyDrag {
                                 view: drag,
                                 value: drag_value,
@@ -2858,6 +2869,32 @@ impl Interactivity {
                         }
                     });
                 }
+
+                // Registered before the click listener below, so in the capture
+                // phase it runs first and hands that listener the mouse-down.
+                window.on_mouse_event({
+                    let pending_mouse_down = pending_mouse_down.clone();
+                    let hitbox = hitbox.clone();
+                    move |event: &MouseUpEvent, phase, window, cx| {
+                        if phase != DispatchPhase::Capture {
+                            return;
+                        }
+                        let Some((mouse_down, value)) = drag_origin.borrow_mut().take() else {
+                            return;
+                        };
+                        let ours = cx.active_drag.as_ref().is_some_and(|drag| {
+                            Arc::as_ptr(&drag.value) as *const () == Arc::as_ptr(&value) as *const ()
+                        });
+                        if ours
+                            && hitbox.is_hovered(window)
+                            && (event.position - mouse_down.position).magnitude() <= CLICK_SLOP
+                        {
+                            cx.active_drag = None;
+                            *pending_mouse_down.borrow_mut() = Some(mouse_down);
+                            window.refresh();
+                        }
+                    }
+                });
 
                 window.on_mouse_event({
                     let mut captured_mouse_down = None;
@@ -3356,6 +3393,9 @@ pub struct InteractiveElementState {
     pub(crate) hover_state: Option<Rc<RefCell<ElementHoverState>>>,
     pub(crate) hover_listener_state: Option<Rc<RefCell<bool>>>,
     pub(crate) pending_mouse_down: Option<Rc<RefCell<Option<MouseDownEvent>>>>,
+    /// The mouse-down that started this element's drag, and that drag's
+    /// value, until the drag ends: a release near it turns back into a click.
+    pub(crate) drag_origin: Option<Rc<RefCell<Option<(MouseDownEvent, Arc<dyn Any>)>>>>,
     /// Set to the window's [`focus_generation`](crate::Window::focus_generation)
     /// when an Enter/Space keydown is received while this element is focused,
     /// recording that we are waiting for the matching keyup to fire a keyboard
@@ -4121,7 +4161,7 @@ impl ScrollHandle {
 mod tests {
     use super::*;
     use crate::{
-        AnyWindowHandle, AppContext as _, Context, InputEvent, Keystroke, MouseMoveEvent,
+        AnyWindowHandle, AppContext as _, Context, InputEvent, Keystroke, Modifiers, MouseMoveEvent,
         TestAppContext, canvas, util::FluentBuilder as _,
     };
     use std::{cell::Cell, rc::Weak};
@@ -4223,6 +4263,62 @@ mod tests {
         assert_eq!(render_count.get(), initial_render_count + 2);
         assert_eq!(anonymous_paint_count.get(), 1);
         assert_eq!(stateful_width.get(), px(10.));
+    }
+
+    struct DragValue;
+
+    struct DragPreview;
+
+    impl Render for DragPreview {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    struct ClickOrDragView {
+        clicks: Rc<Cell<usize>>,
+        drops: Rc<Cell<usize>>,
+    }
+
+    impl Render for ClickOrDragView {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let (clicks, drops) = (self.clicks.clone(), self.drops.clone());
+            div()
+                .size_full()
+                .on_drop(move |_: &DragValue, _, _| drops.set(drops.get() + 1))
+                .child(
+                    div()
+                        .id("source")
+                        .size(px(100.))
+                        .on_click(move |_, _, _| clicks.set(clicks.get() + 1))
+                        .on_drag(DragValue, |_, _, _, cx| cx.new(|_| DragPreview)),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn a_drag_released_near_its_start_on_its_source_is_a_click(cx: &mut TestAppContext) {
+        let (clicks, drops) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+        let (_, cx) = cx.add_window_view({
+            let (clicks, drops) = (clicks.clone(), drops.clone());
+            move |_, _| ClickOrDragView { clicks, drops }
+        });
+        let press = |cx: &mut crate::VisualTestContext, travel: f32| {
+            let (down, up) = (point(px(20.), px(20.)), point(px(20. + travel), px(20.)));
+            cx.simulate_mouse_down(down, MouseButton::Left, Modifiers::default());
+            cx.simulate_mouse_move(up, MouseButton::Left, Modifiers::default());
+            cx.update(|_, cx| assert!(cx.has_active_drag(), "{travel}px starts a drag"));
+            cx.simulate_mouse_up(up, MouseButton::Left, Modifiers::default());
+            cx.update(|_, cx| assert!(!cx.has_active_drag()));
+        };
+
+        // Jitter past the drag threshold, released where it started: a click.
+        press(cx, 6.);
+        assert_eq!((clicks.get(), drops.get()), (1, 0));
+
+        // A real drag still drops, and does not click.
+        press(cx, 30.);
+        assert_eq!((clicks.get(), drops.get()), (1, 1));
     }
 
     struct TestTooltipView;
