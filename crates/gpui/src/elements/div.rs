@@ -46,15 +46,11 @@ use std::{
 use super::ImageCacheProvider;
 
 /// Pointer travel (px) that promotes a mouse-down into a drag. Zed's
-/// original 2px is tuned for precise macOS trackpads; on Windows, ordinary
-/// mouse jitter routinely crosses it mid-click, promoting plain clicks into
-/// accidental drags. Windows uses its system drag rectangle instead
-/// (`SM_CXDRAG`/`SM_CYDRAG`, 4px by default) — the same click-vs-drag
-/// disambiguation native Windows apps apply.
-#[cfg(target_os = "windows")]
+/// original 2px loses clicks to accidental drags: a physical press on a
+/// macOS trackpad or a mouse routinely travels 2-3px between down and up,
+/// and Windows mouse jitter does the same. 4px everywhere, the size of
+/// Windows' system drag rectangle (`SM_CXDRAG`/`SM_CYDRAG`).
 const DRAG_THRESHOLD: f64 = 4.;
-#[cfg(not(target_os = "windows"))]
-const DRAG_THRESHOLD: f64 = 2.;
 const DEFAULT_TOOLTIP_SHOW_DELAY: Duration = Duration::from_millis(500);
 const HOVERABLE_TOOLTIP_HIDE_DELAY: Duration = Duration::from_millis(500);
 
